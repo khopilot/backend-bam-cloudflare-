@@ -1,0 +1,28 @@
+name = "bamflix-workers"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[env.production]
+name = "bamflix-workers-prod"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "bamflix-db"
+database_id = "940d369f-7898-4aac-b237-c08e16f4d50d"
+
+# KV Namespace for sessions
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "a59d09e5c1db4c6a9d8d8f12ebeca28d"
+
+# KV Namespace for cache
+[[kv_namespaces]]
+binding = "CACHE"
+id = "aa0a2b986023468eb8757fa6f748e3e4"
+
+# Environment variables (will be set via dashboard)
+[vars]
+JWT_SECRET = "LN7CUqQGvf6ETQP1CkCxJEIrJp6I5k9jsEc9HhXzR0I="
+TMDB_AUTH = "PLEASE_ADD_YOUR_TMDB_TOKEN"
+TMDB_URL = "https://api.themoviedb.org/3"
