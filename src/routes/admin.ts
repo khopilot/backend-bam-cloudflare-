@@ -2254,9 +2254,9 @@ admin.get('/users', requireAdmin, async (c) => {
 
     const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    // Main query with computed metrics
-    // NOTE: Simplified query - only uses tables that exist in production (users, profiles, watchlist)
-    // TODO: Add watch_history and videos JOINs once those tables are deployed to production
+    // Main query with computed metrics - FULL VERSION
+    // Tables: users, profiles, watchlist, watch_history, videos
+    // Note: comments table exists but feature not used (no JOIN)
     const usersQuery = `
       SELECT
         u.id,
@@ -2267,31 +2267,38 @@ admin.get('/users', requireAdmin, async (c) => {
         u.avatar_url,
         u.created_at,
 
-        -- Metrics from existing tables only
+        -- Engagement Metrics
         COUNT(DISTINCT p.id) as profiles_count,
+        COUNT(DISTINCT wh.video_id) as videos_watched,
+        COALESCE(ROUND(SUM(wh.completion_percentage * v.duration / 100 / 3600.0), 2), 0) as total_watch_hours,
+        0 as comments_count,  -- No comments feature implemented
         COUNT(DISTINCT wl.id) as watchlist_count,
+        MAX(wh.last_watched) as last_active,
 
-        -- Set zeros for video metrics (until watch_history table exists)
-        0 as videos_watched,
-        0.0 as total_watch_hours,
-        0 as comments_count,
-        NULL as last_active,
-
-        -- Simplified engagement score (profiles + watchlist only)
-        -- Full formula will be restored once watch_history table is deployed
+        -- Computed Business Metrics
+        -- Weighted formula: 40% watch hours + 30% videos + 20% profiles + 10% watchlist
         CAST(ROUND(
           LEAST(100, (
-            (CAST(COUNT(DISTINCT p.id) AS REAL) / 5.0) * 60 +
-            (CAST(COUNT(DISTINCT wl.id) AS REAL) / 20.0) * 40
+            (COALESCE(SUM(wh.completion_percentage * v.duration / 100 / 3600.0), 0) / 10) * 40 +
+            (CAST(COUNT(DISTINCT wh.video_id) AS REAL) / 50.0) * 30 +
+            (CAST(COUNT(DISTINCT p.id) AS REAL) / 5.0) * 20 +
+            (CAST(COUNT(DISTINCT wl.id) AS REAL) / 20.0) * 10
           ))
         , 0) AS INTEGER) as engagement_score,
 
-        -- Default churn risk to high (no watch history available yet)
-        'high' as churn_risk,
+        -- Churn risk based on last watch activity
+        CASE
+          WHEN MAX(wh.last_watched) IS NULL THEN 'high'
+          WHEN JULIANDAY('now') - JULIANDAY(MAX(wh.last_watched)) > 30 THEN 'high'
+          WHEN JULIANDAY('now') - JULIANDAY(MAX(wh.last_watched)) > 14 THEN 'medium'
+          ELSE 'low'
+        END as churn_risk,
 
+        -- Account health flags
         CASE
           WHEN u.display_name IS NULL OR u.avatar_url IS NULL THEN 1
           WHEN COUNT(DISTINCT p.id) = 0 THEN 1
+          WHEN COUNT(DISTINCT wh.video_id) = 0 THEN 1
           ELSE 0
         END as has_issues,
 
@@ -2299,6 +2306,8 @@ admin.get('/users', requireAdmin, async (c) => {
 
       FROM users u
       LEFT JOIN profiles p ON u.id = p.user_id
+      LEFT JOIN watch_history wh ON u.id = wh.user_id
+      LEFT JOIN videos v ON wh.video_id = v.id
       LEFT JOIN watchlist wl ON p.id = wl.profile_id
 
       ${whereSQL}
